@@ -13,6 +13,8 @@ import re
 from openqa_client.exceptions import RequestError
 from openqabot.errors import NoResultsError
 from openqabot.openqa import openQAInterface
+from openqabot.smeltsync import SMELTSync
+from openqabot.aggrsync import AggregateResultsSync
 
 from . import OBS_GROUP, OBS_MAINT_PRJ, OBS_URL, QEM_DASHBOARD
 from .loader.qem import (
@@ -23,6 +25,8 @@ from .loader.qem import (
     get_incidents_approver,
     get_single_incident,
 )
+#from .loader.smelt import get_active_incidents, get_incidents
+
 from .utils import retry3 as requests
 
 log = getLogger("bot.approver")
@@ -52,21 +56,47 @@ def _handle_http_error(e: HTTPError, inc: IncReq) -> bool:
 class Approver:
     def __init__(self, args: Namespace) -> None:
         self.dry = args.dry
+        self.direct_openqa_data = args.direct_openqa_data
         self.single_incident = args.incident
         self.token = {"Authorization": "Token {}".format(args.token)}
         self.all_incidents = args.all_incidents
         self.client = openQAInterface(args.openqa_instance)
+        self.args = args
 
     def __call__(self) -> int:
         log.info("Start approving incidents in IBS")
-        increqs = (
-            get_single_incident(self.token, self.single_incident)
-            if self.single_incident
-            else get_incidents_approver(self.token)
-        )
+        if self.direct_openqa_data:
+            # Get incident,rr_number for only stuff in review - Directly from SMELT
+            #TODO: handle single incident version and not all of them
+            smelt_sync = SMELTSync(self.args)
+            data = SMELTSync._create_list(smelt_sync.incidents)
+            log.info("SMELT_DATA-")
+            log.info(data)
+            increqs = [IncReq(i["number"], i["rr_number"]) for i in data if i["inReviewQAM"]]
+            ##########################################################
+            log.info("INCREQS-")
+            log.info(increqs)
 
-        overall_result = True
-        incidents_to_approve = [inc for inc in increqs if self._approvable(inc)]
+            # Get test result from openQA
+            agg_result_sync = AggregateResultsSync(self.args)
+            a_results = agg_result_sync._get_results_from_openqa() #TODO: wrong, is using dashboard
+            log.info(a_results)
+            # here I get openqa jobid but NOT related update requests
+
+            # Check if test can be approved
+            incidents_to_approve = [inc for inc in increqs if self._approvable_from_openqa_data(inc,a_results)]
+            #TODO: also incidents, after aggregates!
+
+            return 0 #TODO: remove this when finished
+        else:
+            increqs = (
+                get_single_incident(self.token, self.single_incident)
+                if self.single_incident
+                else get_incidents_approver(self.token)
+            )
+
+            overall_result = True
+            incidents_to_approve = [inc for inc in increqs if self._approvable(inc)]
 
         log.info("Incidents to approve:")
         for inc in incidents_to_approve:
@@ -75,11 +105,18 @@ class Approver:
         if not self.dry:
             osc.conf.get_config(override_apiurl=OBS_URL)
             for inc in incidents_to_approve:
-                overall_result &= self.osc_approve(inc)
+                #overall_result &= self.osc_approve(inc) #TODO: disabled for safety
+                log.info("FAKE APPROVAL")
 
         log.info("End of bot run")
 
         return 0 if overall_result else 1
+
+    def _approvable_from_openqa_data(self, inc: IncReq, l: List) -> bool:
+        #TODO: check if 
+        #TODO: need to evaluate withAggregate bool from settings and incidents.py
+        
+        return False
 
     def _approvable(self, inc: IncReq) -> bool:
         try:

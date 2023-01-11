@@ -19,16 +19,18 @@ class AggregateResultsSync(SyncRes):
         super().__init__(args)
         self.product = read_products(args.configs)
 
-    def __call__(self) -> int:
-
+    def _get_results_from_openqa(self):
         update_setting = []
+        log.info("PRODUCT-")
+        log.info(self.product) #TODO: remove
         for product in self.product:
             try:
                 update_setting += get_aggregate_settings_data(self.token, product)
             except EmptySettings as e:
                 log.info(e)
                 continue
-
+        log.info("UPDATE_SETTING-")
+        log.info(update_setting) #TODO: remove
         job_results = {}
         with ThreadPoolExecutor() as executor:
             future_j = {
@@ -49,7 +51,12 @@ class AggregateResultsSync(SyncRes):
                     continue
 
                 results.append(r)
+        return results
+        
+    def __call__(self) -> int:
 
+
+        results = self.get_results_from_openqa(self)
         for r in results:
             self.post_result(r)
 

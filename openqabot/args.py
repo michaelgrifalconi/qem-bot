@@ -170,6 +170,11 @@ def get_parser():
         type=str,
         help="Incident ID (to approve only a single incident)",
     )
+    cmdappr.add_argument(
+        "--direct-openqa-data",
+        action="store_true",
+        help="use live openqa data and not the dashboard database",
+    )
 
     cmdappr.set_defaults(func=do_approve)
 
